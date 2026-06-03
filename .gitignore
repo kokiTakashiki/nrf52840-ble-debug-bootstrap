@@ -1,0 +1,14 @@
+# west / Zephyr build artifacts
+/build/
+build/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Sniffer DFU 生成物
+*.zip

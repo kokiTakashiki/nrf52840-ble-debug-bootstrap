@@ -1,0 +1,156 @@
+name: idempotency
+
+# DESIGN-001 の冪等性を機械的に検証する。
+# ハードウェア（DK / ドングル）や NCS SDK を要するターゲットは CI で実行できないため、
+# ここでは「構造の妥当性」と「ハードウェア非依存ターゲットの冪等性」を検証する。
+#   - parse-lint   : 全ターゲットの dry-run パースと .PHONY 網羅性（ubuntu）
+#   - idempotency  : check-os / clean をハードウェア無しで実際に実行し冪等性を確認（Apple Silicon）
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ----------------------------------------------------------
+  # 構造検証: どの環境でも実行可能（dry-run はレシピを実行しない）
+  # ----------------------------------------------------------
+  parse-lint:
+    name: parse & .PHONY lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 全ターゲットが dry-run でパースできること
+        run: |
+          set -euo pipefail
+          # fetch-ncs は数 GB DL のため smoke 実行はせず dry-run パースのみで検証する。
+          targets="help setup deploy check-os install-nrfutil install-tools install-sniffer fetch-ncs build-firmware flash-dk flash-sniffer-dongle verify clean"
+          for t in $targets; do
+            echo "--- make -n $t ---"
+            make -n "$t" >/dev/null
+          done
+          echo "OK: 全 13 ターゲットがパース成功"
+
+      - name: 素の make（既定ゴール）が help を表示し副作用を持たないこと
+        run: |
+          set -euo pipefail
+          out="$(make)"
+          echo "$out"
+          echo "$out" | grep -qF 'make setup' || { echo "::error::help に make setup の案内がありません"; exit 1; }
+          echo "$out" | grep -qF 'verify' || { echo "::error::help にターゲット一覧が出ていません"; exit 1; }
+          echo "OK: 既定ゴール=help（副作用なし）"
+
+      - name: 依存グラフが設計どおり解決されること
+        run: |
+          set -euo pipefail
+          # setup（ソフト工程のみ）の dry-run に各ターゲットの開始ログが現れることを確認
+          out="$(make -n setup 2>&1)"
+          for needle in 'check-os: OK' 'install-tools: 導入状況' 'fetch-ncs: NCS' 'build-firmware:'; do
+            echo "$out" | grep -qF "$needle" || { echo "::error::setup の依存解決に $needle が含まれていません"; exit 1; }
+          done
+          # setup にハードウェア工程（flash / verify）が含まれないことを確認
+          for needle in 'flash-dk: 開発キット' 'flash-sniffer-dongle:' 'verify: 構築結果'; do
+            echo "$out" | grep -qF "$needle" && { echo "::error::setup にハードウェア工程 $needle が混入しています"; exit 1; } || true
+          done
+          # deploy（実機書き込みのみ）の dry-run に flash が現れることを確認
+          dout="$(make -n deploy 2>&1)"
+          for needle in 'flash-dk: 開発キット' 'flash-sniffer-dongle:'; do
+            echo "$dout" | grep -qF "$needle" || { echo "::error::deploy の依存解決に $needle が含まれていません"; exit 1; }
+          done
+          # deploy に検証（verify）が混入していないこと（書き込みと検証は分離）
+          echo "$dout" | grep -qF 'verify: 構築結果' && { echo "::error::deploy に検証工程 verify が混入しています（verify は独立ターゲット）"; exit 1; } || true
+          # verify は独立した読み取り専用ターゲットとして解決できること
+          make -n verify 2>&1 | grep -qF 'verify: 構築結果' || { echo "::error::verify ターゲットが解決できません"; exit 1; }
+          echo "OK: setup / deploy / verify の依存グラフが設計どおり（書き込みと検証は分離）"
+
+      - name: すべてのターゲットが .PHONY 指定されていること
+        run: |
+          set -euo pipefail
+          # ルール行のターゲット名（特殊ターゲット . で始まるものと変数代入を除外）
+          targets="$(grep -E '^[a-z][a-zA-Z0-9_-]*:' Makefile | sed 's/:.*//' | sort -u)"
+          # .PHONY 宣言（行継続 \ を畳んで 1 行に）
+          phony="$(awk '/^\.PHONY:/{p=1} p{line=line $0} p && !/\\$/{exit} END{gsub(/\\/," ",line); sub(/^\.PHONY:/,"",line); print line}' Makefile | tr ' ' '\n' | sort -u)"
+          rc=0
+          for t in $targets; do
+            if ! echo "$phony" | grep -qx "$t"; then
+              echo "::error::ターゲット '$t' が .PHONY に含まれていません"
+              rc=1
+            fi
+          done
+          [ "$rc" -eq 0 ] && echo "OK: 全ターゲットが .PHONY 指定済み"
+          exit "$rc"
+
+  # ----------------------------------------------------------
+  # 冪等性検証: Apple Silicon ランナー（arm64）で read-only / clean を実際に実行
+  # ----------------------------------------------------------
+  idempotency:
+    name: idempotency (Apple Silicon)
+    runs-on: macos-14   # M シリーズ = arm64。check-os の前提を満たす
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: アーキテクチャ確認（arm64 であること）
+        run: |
+          test "$(uname -m)" = "arm64" || { echo "::error::ランナーが arm64 ではありません"; exit 1; }
+
+      - name: check-os が成功すること
+        run: make check-os
+
+      - name: check-os が冪等であること（2 回実行で出力が同一）
+        run: |
+          set -euo pipefail
+          a="$(make check-os)"
+          b="$(make check-os)"
+          if [ "$a" != "$b" ]; then
+            echo "::error::check-os の出力が再実行で変化しました（冪等性違反）"
+            printf '1回目:\n%s\n2回目:\n%s\n' "$a" "$b"
+            exit 1
+          fi
+          echo "OK: check-os は冪等"
+
+      - name: clean が成果物を削除し、かつ冪等であること
+        run: |
+          set -euo pipefail
+          # 成果物を擬似生成 → clean で消える → 再度 clean しても最終状態は不変
+          mkdir -p build && touch build/dummy.o
+          make clean
+          test ! -d build || { echo "::error::clean が build/ を削除していません"; exit 1; }
+          # 対象不在でも正常終了すること（rm -rf）
+          make clean
+          test ! -d build
+          echo "OK: clean は冪等（成果物有→無→無、いずれも exit 0）"
+
+      - name: setup の依存グラフが dry-run で解決されること
+        run: make -n setup >/dev/null
+
+  # ----------------------------------------------------------
+  # smoke test: install-tools の最も壊れやすい工程（nrfutil 本体導入）を
+  # 実機実行して検証する。dry-run では検出できない「導入コマンドが実際に
+  # 動くか」を確認する（過去に brew cask 破損を見逃した穴を埋める → DL-6）。
+  # NCS Toolchain 本体（数 GB）は重いため除外。public リポジトリのため
+  # macos-14 標準ランナーは無料。
+  # ----------------------------------------------------------
+  install-smoke:
+    name: install-nrfutil smoke (Apple Silicon)
+    runs-on: macos-14   # arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: make install-nrfutil を実機実行
+        run: make install-nrfutil
+
+      - name: nrfutil が実際に起動すること（壊れた symlink を検出）
+        run: |
+          set -euo pipefail
+          nrfutil --version
+          echo "OK: nrfutil 本体が実機で起動"
+
+      - name: install-nrfutil が冪等であること（2 回目はスキップ）
+        run: |
+          set -euo pipefail
+          out="$(make install-nrfutil)"
+          echo "$out"
+          echo "$out" | grep -qF '[skip] nrfutil は導入済み' || { echo "::error::2 回目がスキップされていません（冪等性違反）"; exit 1; }
+          echo "OK: install-nrfutil は冪等"
