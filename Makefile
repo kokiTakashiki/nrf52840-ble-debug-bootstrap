@@ -273,6 +273,31 @@ build-firmware: install-tools fetch-ncs ## peripheral_uart をビルド
 	@echo "==> build-firmware: 完了 ($(BUILD_DIR))"
 
 # ============================================================
+# erase-dk : 開発キットの全フラッシュを消去し「無地」状態にする
+#   既存ファームを消すと全 LED が消灯するため、flash-blinky の前段に置くと
+#   「消灯(baseline) → 書き込み → 点滅」という観測可能な OFF→ON 差分を作れる。
+#   接続検出は flash-dk と同じ（nrfjprog 必須 / J-Link 接続必須）。
+#   冪等性: 既に消去済みでも --eraseall は同じ無地状態に収束する。
+# ============================================================
+erase-dk: ## 開発キットの全消去（LED 消灯。要 DK 接続）
+	@echo "==> erase-dk: 開発キットを全消去します（全 LED が消灯します）"
+	@if ! command -v nrfjprog >/dev/null 2>&1; then \
+		echo "ERROR(erase-dk): nrfjprog が見つかりません。" >&2; \
+		echo "  nrfjprog は nRF Command Line Tools に含まれます（J-Link 経由の DK 操作に必要）。" >&2; \
+		echo "  対処: 下記からダウンロードしてインストールしてください:" >&2; \
+		echo "    https://www.nordicsemi.com/Products/Development-tools/nRF-Command-Line-Tools/Download" >&2; \
+		exit 1; \
+	fi
+	@ids="$$(nrfjprog --ids 2>/dev/null || true)"; \
+	if [ -z "$$ids" ]; then \
+		echo "ERROR(erase-dk): 接続中の開発キット(J-Link)が検出できません。USB 接続を確認してください。" >&2; \
+		exit 1; \
+	fi; \
+	echo "    検出した J-Link: $$ids"
+	@nrfjprog --eraseall
+	@echo "==> erase-dk: 完了（全 LED が消灯しているはずです）"
+
+# ============================================================
 # flash-dk : ビルド済みファームウェアを開発キットへ書き込む
 #   接続中の DK(J-Link) を検出し、未接続時は明示エラーで停止
 #   同一ファームウェアの再書き込みは結果状態を変えないため実質冪等
@@ -445,4 +470,4 @@ clean: ## ビルド成果物を削除
 # .PHONY 指定（同名ファイルの有無に挙動を左右されないようにする）
 # ============================================================
 .PHONY: help setup deploy check-os install-nrfutil install-tools install-sniffer fetch-ncs build-firmware \
-        flash-dk flash-sniffer-dongle verify clean
+        erase-dk flash-dk flash-sniffer-dongle verify clean
