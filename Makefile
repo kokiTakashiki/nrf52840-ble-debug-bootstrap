@@ -348,6 +348,9 @@ uart-send: ## DK シリアルへ UART_MSG を送信（上り検査。既定 worl
 uart-capture: ## DK シリアルを UART_SECS 秒キャプチャして表示（下り検査。既定 30）
 	@bash "$(CURDIR)/scripts/dk-uart.sh" capture "$(UART_SECS)"
 
+uart-fwcheck: ## DK が peripheral_uart で起動しているか自動判定（要 DK / リセットあり）
+	@bash "$(CURDIR)/scripts/dk-uart.sh" fwcheck
+
 # ============================================================
 # flash-sniffer-dongle : USB ドングルへ Sniffer FW を書き込む
 #   ble-sniffer 同梱の署名付き DFU zip を `nrfutil device program` で書き込む。
@@ -490,4 +493,4 @@ clean: ## ビルド成果物を削除
 # .PHONY 指定（同名ファイルの有無に挙動を左右されないようにする）
 # ============================================================
 .PHONY: help setup deploy check-os install-nrfutil install-tools install-sniffer fetch-ncs build-firmware \
-        erase-dk flash-dk uart-port uart-send uart-capture flash-sniffer-dongle verify clean
+        erase-dk flash-dk uart-port uart-send uart-capture uart-fwcheck flash-sniffer-dongle verify clean

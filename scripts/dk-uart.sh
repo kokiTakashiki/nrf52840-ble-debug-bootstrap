@@ -13,6 +13,7 @@
 #   port            … DK コンソールの VCOM パスを 1 行で出力（識別）
 #   send [MSG]      … MSG（既定 world）に CR+LF を付けて DK シリアルへ送信（上り検査）
 #   capture [SECS]  … DK シリアルを SECS 秒（既定 30）読み、受信バイトを stdout へ（下り検査）
+#   fwcheck         … DK をリセットして起動ログを読み、peripheral_uart か自動判定（OK→0 / 非該当→3）
 #
 # ポート識別: SEGGER J-Link 配下の cu.usbmodem を列挙し、最小番号をコンソールとみなす
 # （nRF52840 DK は J-Link OB が複数 VCOM を出すことがあり、アプリ UART は先頭=最小番号）。
@@ -82,8 +83,44 @@ case "$cmd" in
 		' "$secs" <&4
 		exec 4>&-
 		;;
+	fwcheck)
+		# DK のファームが peripheral_uart か（= NUS を広告するか）を自動判定する。
+		# nrfjprog でリセットして起動ログを読み、peripheral_uart 固有の起動メッセージを探す。
+		# 副作用: リセットにより DK は広告状態へ戻る（既存の接続は切れる）。
+		# DK 未接続 / nrfjprog 無し は確認をスキップして 0 で抜ける（機械では止めない）。
+		port="$(detect_port)" || exit 0
+		if ! command -v nrfjprog >/dev/null 2>&1; then
+			echo "WARN(dk-uart): nrfjprog が無いため DK ファーム確認をスキップします。" >&2
+			exit 0
+		fi
+		needle="Starting Nordic UART service example"
+		tmp="$(mktemp)"
+		# 先に読み取りを開始 → リセット → 起動ログを拾う（needle を見つけたら即終了）。
+		exec 4<>"$port"
+		set_baud "$port"
+		( perl -e '
+			my ($secs, $needle) = @ARGV;
+			$SIG{ALRM} = sub { exit 0 };
+			alarm $secs;
+			binmode STDIN;
+			while (my $line = <STDIN>) { print $line; last if index($line, $needle) >= 0; }
+		' 8 "$needle" <&4 >"$tmp" 2>/dev/null ) &
+		rpid=$!
+		nrfjprog --reset >/dev/null 2>&1 || true
+		wait "$rpid" 2>/dev/null || true
+		exec 4>&-
+		if grep -q "$needle" "$tmp" 2>/dev/null; then
+			echo "OK: DK は peripheral_uart で起動しています（NUS を広告中）。"
+			rm -f "$tmp"
+			exit 0
+		fi
+		echo "WARN: DK が peripheral_uart でない可能性があります（起動ログに NUS の起動メッセージなし）。" >&2
+		echo "      観測対象を出すには 'make flash-peripheral' で peripheral_uart を書き込んでください。" >&2
+		rm -f "$tmp"
+		exit 3
+		;;
 	*)
-		echo "usage: dk-uart.sh {port|send [MSG]|capture [SECS]}" >&2
+		echo "usage: dk-uart.sh {port|send [MSG]|capture [SECS]|fwcheck}" >&2
 		exit 2
 		;;
 esac
