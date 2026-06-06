@@ -1,6 +1,6 @@
 # ============================================================
 # DESIGN-001 環境構築 Makefile
-# Core Bluetooth 検証環境を冪等に構築する自動化レイヤ
+# nRF52840 の BLE デバッグ環境（Peripheral＋Sniffer）を冪等に構築する自動化
 #
 # 設計方針:
 #   - 各ターゲットは状態検査つきの冪等な単位として定義する。
@@ -329,6 +329,26 @@ flash-dk: build-firmware ## 開発キットへ書き込み（要 DK 接続）
 	@echo "==> flash-dk: 完了"
 
 # ============================================================
+# uart-port / uart-send / uart-capture : peripheral_uart 往復検証の device 操作
+#   peripheral_uart は BLE(NUS)↔DK の UART を橋渡しするだけなので、往復確認には
+#   「DK のシリアル端末」へ送る/から受ける host 側操作が要る。その識別・送受信を
+#   scripts/dk-uart.sh に閉じ込め、薄いターゲットとして公開する（対話的な誘導 UX は
+#   呼び出し側に委ねる）。`make uart-send` → 別端末や iPhone で受信確認、のように単体でも使える。
+#   対象: Apple Silicon Mac（ioreg / stty -f / perl）。UART_PORT で明示指定可。
+# ============================================================
+UART_MSG  ?= world
+UART_SECS ?= 30
+
+uart-port: ## DK コンソールの仮想シリアル(VCOM)を識別して表示
+	@bash "$(CURDIR)/scripts/dk-uart.sh" port
+
+uart-send: ## DK シリアルへ UART_MSG を送信（上り検査。既定 world）
+	@bash "$(CURDIR)/scripts/dk-uart.sh" send "$(UART_MSG)"
+
+uart-capture: ## DK シリアルを UART_SECS 秒キャプチャして表示（下り検査。既定 30）
+	@bash "$(CURDIR)/scripts/dk-uart.sh" capture "$(UART_SECS)"
+
+# ============================================================
 # flash-sniffer-dongle : USB ドングルへ Sniffer FW を書き込む
 #   ble-sniffer 同梱の署名付き DFU zip を `nrfutil device program` で書き込む（→ DL-12）。
 #   ドングルは RESET ボタンで Open Bootloader(LED 赤点滅 = nordicDfu トレイト)にしておく。
@@ -470,4 +490,4 @@ clean: ## ビルド成果物を削除
 # .PHONY 指定（同名ファイルの有無に挙動を左右されないようにする）
 # ============================================================
 .PHONY: help setup deploy check-os install-nrfutil install-tools install-sniffer fetch-ncs build-firmware \
-        erase-dk flash-dk flash-sniffer-dongle verify clean
+        erase-dk flash-dk uart-port uart-send uart-capture flash-sniffer-dongle verify clean
