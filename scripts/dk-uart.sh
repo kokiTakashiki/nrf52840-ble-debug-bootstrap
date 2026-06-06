@@ -5,7 +5,8 @@
 #
 # peripheral_uart は BLE(NUS) と DK の UART を橋渡しするだけなので、往復検証には
 # 「DK のシリアル端末」へ送る/から受ける手段が要る。その host 側 device 操作を
-# ここに閉じ込め、親リポジトリの誘導フロー(verify-peripheral)から呼ぶ。
+# ここに閉じ込め、uart-port / uart-send / uart-capture の各ターゲットとして公開する
+# （対話的な誘導 UX は呼び出し側に委ねる）。
 #
 # 対象: Apple Silicon Mac（ioreg / stty -f / perl を使用）。
 # サブコマンド:

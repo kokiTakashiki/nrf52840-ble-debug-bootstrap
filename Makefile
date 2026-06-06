@@ -332,7 +332,8 @@ flash-dk: build-firmware ## 開発キットへ書き込み（要 DK 接続）
 # uart-port / uart-send / uart-capture : peripheral_uart 往復検証の device 操作
 #   peripheral_uart は BLE(NUS)↔DK の UART を橋渡しするだけなので、往復確認には
 #   「DK のシリアル端末」へ送る/から受ける host 側操作が要る。その識別・送受信を
-#   scripts/dk-uart.sh に閉じ込め、薄いターゲットで公開する（誘導 UX は親が担う）。
+#   scripts/dk-uart.sh に閉じ込め、薄いターゲットとして公開する（対話的な誘導 UX は
+#   呼び出し側に委ねる）。`make uart-send` → 別端末や iPhone で受信確認、のように単体でも使える。
 #   対象: Apple Silicon Mac（ioreg / stty -f / perl）。UART_PORT で明示指定可。
 # ============================================================
 UART_MSG  ?= world
