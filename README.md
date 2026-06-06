@@ -5,8 +5,6 @@ nRF52840 製の BLE デバッグ環境（Peripheral＋Sniffer）を Apple Silico
 > 対象: Apple Silicon Mac。Xcode / iOS 実機署名の自動化は対象外。
 >
 > 必要な機材: nRF52840 DK（PCA10056）と nRF52840 MDBT50Q USB ドングルの 2 つ。いずれも必須。
->
-> このリポジトリは [CoreBluetoothDevelopmentBootstrap](https://github.com/kokiTakashiki/CoreBluetoothDevelopmentBootstrap) から submodule として利用される、Core Bluetooth（BLE）検証環境の「対向＋観測」レイヤである。単体でも nRF52840 の BLE デバッグ環境として使える。
 
 ## 用語
 
